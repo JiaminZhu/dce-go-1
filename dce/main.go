@@ -262,6 +262,7 @@ func (exec *dockerComposeExecutor) FrameworkMessage(driver exec.ExecutorDriver, 
 }
 
 func (exec *dockerComposeExecutor) Shutdown(driver exec.ExecutorDriver) {
+	fmt.Println("====================Executor Shutdown====================")
 	// Execute shutdown plugin extensions in order
 	for _, ext := range extpoints {
 		ext.Shutdown(pod.ComposeExcutorDriver)

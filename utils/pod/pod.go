@@ -26,6 +26,8 @@ import (
 
 	"fmt"
 
+	"path/filepath"
+
 	"github.com/mesos/mesos-go/executor"
 	mesos "github.com/mesos/mesos-go/mesosproto"
 	"github.com/paypal/dce-go/config"
@@ -50,6 +52,7 @@ var PodStatus = &types.PodStatus{
 }
 var ComposeFiles []string
 var ComposeTaskInfo *mesos.TaskInfo
+var healthCheckFilePath string
 
 var HealthCheckListId = make(map[string]bool)
 
@@ -114,6 +117,13 @@ func GenerateCmdParts(files []string, cmd string) ([]string, error) {
 	}
 	s = strings.TrimSpace(s) + cmd
 	return strings.Fields(s), nil
+}
+
+func customHealthCheck(healthCheckFile string) string {
+	if _, err := os.Stat(healthCheckFile); err != nil {
+		return types.STARTING
+	}
+	return types.HEALTHY
 }
 
 // Get set of containers id in pod
@@ -265,8 +275,8 @@ func LaunchPod(files []string) string {
 
 	log.Printf("Launch Pod : Command to launch task : docker-compose %v\n", parts)
 	cmd := exec.Command("docker-compose", parts...)
-        cmd.Stdout = os.Stdout
-        cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
 	composeHttpTimeout := config.GetConfigSection(config.LAUNCH_TASK)[CONFIG_COMPOSE_HTTP_TIMEOUT]
 	cmd.Env = os.Environ()
@@ -453,7 +463,7 @@ func PullImage(files []string) error {
 	}
 
 	cmd := exec.Command("docker-compose", parts...)
-        cmd.Stdout = os.Stdout
+	cmd.Stdout = os.Stdout
 	log.Println("Pull Image : Command to pull images : docker-compose ", parts)
 
 	err = cmd.Start()
@@ -473,8 +483,8 @@ func PullImage(files []string) error {
 
 //Check container
 //return healthy,run,err
-func CheckContainer(containerId string, healthcheck bool) (string, int, error) {
-	containerDetail, err := InspectContainerDetails(containerId, healthcheck)
+func CheckContainer(containerId string, dockerHealthcheck bool) (string, int, error) {
+	containerDetail, err := InspectContainerDetails(containerId, dockerHealthcheck)
 	if err != nil {
 		log.Errorf("CheckContainer : Error inspecting container with id : %s, %v", containerId, err.Error())
 		return types.UNHEALTHY, 1, err
@@ -485,12 +495,18 @@ func CheckContainer(containerId string, healthcheck bool) (string, int, error) {
 		return types.UNHEALTHY, containerDetail.ExitCode, nil
 	}
 
-	if healthcheck {
+	if dockerHealthcheck {
 		if containerDetail.IsRunning {
 			//log.Printf("CheckContainer : Primary container %s is running , %s\n", containerId, containerDetail.HealthStatus)
 			return containerDetail.HealthStatus, -1, nil
 		}
 		return containerDetail.HealthStatus, containerDetail.ExitCode, nil
+	} else {
+		if config.GetConfig().GetBool(config.CUSTOM_HEALTH_CHECK) {
+			health := customHealthCheck(healthCheckFilePath)
+			//log.Println("custom healthcheck result:", health)
+			return health, -1, nil
+		}
 	}
 
 	if containerDetail.IsRunning {
@@ -693,8 +709,6 @@ func WaitOnPod(ctx *context.Context) {
 	}
 }
 
-
-
 // healthCheck includes health checking for primary container and exit code checking for other containers
 func HealthCheck(files []string, podServices map[string]bool, out chan<- string) {
 	log.Println("====================Health Check====================", len(podServices))
@@ -702,6 +716,15 @@ func HealthCheck(files []string, podServices map[string]bool, out chan<- string)
 	var err error
 	var containers []string
 	var healthCount int
+
+	disableHealthCheck := config.GetConfig().GetBool(config.DISABLE_DOCKER_HEALTHCHECK)
+	log.Printf(" Docker disableHealthCheck:  %+v \n", disableHealthCheck)
+	if disableHealthCheck {
+		healthCheckFilePath, _ = filepath.Abs("")
+		healthCheckFilePath = healthCheckFilePath + "/" + config.GetConfig().GetString(config.FOLDER_NAME) + "/appdata/ecv"
+		log.Println("healthcheck file path: ", healthCheckFilePath)
+		log.Println("custom health check: ", config.GetConfig().GetBool(config.CUSTOM_HEALTH_CHECK))
+	}
 
 	t, err := strconv.Atoi(config.GetConfigSection(config.LAUNCH_TASK)[config.POD_MONITOR_INTERVAL])
 	if err != nil {
@@ -725,21 +748,27 @@ func HealthCheck(files []string, podServices map[string]bool, out chan<- string)
 	log.Println("Initial Health Check : Acutal number of containers in monitoring : ", len(containers))
 	log.Println("Container List : ", containers)
 
-	for len(containers) != healthCount {
+	var healthy string
+
+	for len(containers) != healthCount || healthy != types.HEALTHY {
 		healthCount = 0
 
 		for i := 0; i < len(containers); i++ {
 
-			var healthy string
 			var exitCode int
 
-			if hc, ok := HealthCheckListId[containers[i]]; ok && hc {
-				healthy, exitCode, err = CheckContainer(containers[i], true)
+			if disableHealthCheck {
+				healthy, exitCode, err = CheckContainer(containers[i], false)
+
 			} else {
-				if hc, err = isHealthCheckConfigured(containers[i]); hc {
+				if hc, ok := HealthCheckListId[containers[i]]; ok && hc {
 					healthy, exitCode, err = CheckContainer(containers[i], true)
 				} else {
-					healthy, exitCode, err = CheckContainer(containers[i], false)
+					if hc, err = isHealthCheckConfigured(containers[i]); hc {
+						healthy, exitCode, err = CheckContainer(containers[i], true)
+					} else {
+						healthy, exitCode, err = CheckContainer(containers[i], false)
+					}
 				}
 			}
 

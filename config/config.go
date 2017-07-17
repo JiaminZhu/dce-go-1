@@ -39,7 +39,7 @@ const (
 	CONFIG_File                          = "config"
 	FOLDER_NAME                          = "foldername"
 	LAUNCH_TASK                          = "launchtask"
-	HEALTH_CHECK                         = "healthcheck"
+	CUSTOM_HEALTH_CHECK                  = "customhealthcheck"
 	POD_MONITOR_INTERVAL                 = "podmonitorinterval"
 	TIMEOUT                              = "timeout"
 	INFRA_CONTAINER                      = "infracontainer"
@@ -52,6 +52,7 @@ const (
 	CLEANPOD                             = "cleanpod"
 	CLEAN_CONTAINER_VOLUME_ON_MESOS_KILL = "cleanvolumeandcontaineronmesoskill"
 	CLEAN_IMAGE_ON_MESOS_KILL            = "cleanimageonmesoskill"
+	DISABLE_DOCKER_HEALTHCHECK           = "disabledockerhealthcheck"
 )
 
 // Read from default configuration file and set config as key/values

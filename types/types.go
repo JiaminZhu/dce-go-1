@@ -24,6 +24,7 @@ import (
 
 const (
 	HEALTHY                               = "healthy"
+	STARTING                              = "starting"
 	UNHEALTHY                             = "unhealthy"
 	POD_STAGING                           = "POD_STAGING"
 	POD_STARTING                          = "POD_STARTING"
@@ -32,7 +33,6 @@ const (
 	POD_KILLED                            = "POD_KILLED"
 	POD_FINISHED                          = "POD_FINISHED"
 	POD_PULL_FAILED                       = "PULL_IMAGE_FAILED"
-	HEALTHCHECK                           = "healthcheck"
 	CONTAINER_NAME                        = "container_name"
 	NETWORK_MODE                          = "network_mode"
 	LINKS                                 = "links"

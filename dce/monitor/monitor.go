@@ -39,10 +39,13 @@ func podMonitor() string {
 		var healthy string
 		var exitCode int
 
-		if hc, ok := pod.HealthCheckListId[containers[i]]; ok && hc {
+		disableDockerHealthCheck := config.GetConfig().GetBool(config.DISABLE_DOCKER_HEALTHCHECK)
+
+		if hc, ok := pod.HealthCheckListId[containers[i]]; ok && hc && !disableDockerHealthCheck {
 			healthy, exitCode, err = pod.CheckContainer(containers[i], true)
 			//log.Printf("container %s has health check, health status: %s, exitCode: %d, err : %v", containers[i], healthy, exitCode, err)
 		} else {
+
 			healthy, exitCode, err = pod.CheckContainer(containers[i], false)
 			//log.Printf("container %s no health check, exitCode: %d, err : %v", containers[i], healthy, exitCode, err)
 		}
