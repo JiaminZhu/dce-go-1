@@ -52,6 +52,7 @@ const (
 	CLEANPOD                             = "cleanpod"
 	CLEAN_CONTAINER_VOLUME_ON_MESOS_KILL = "cleanvolumeandcontaineronmesoskill"
 	CLEAN_IMAGE_ON_MESOS_KILL            = "cleanimageonmesoskill"
+	DOCKER_COMPOSE_VERBOSE               = "dockercomposeverbose"
 )
 
 // Read from default configuration file and set config as key/values
@@ -164,9 +165,13 @@ func GetMaxRetry() int {
 	}
 	i, err := strconv.Atoi(retry)
 	if err != nil {
-		log.Fatalf("Error converting retry from string to int : %s\n", err.Error())
+		log.Errorf("Error converting retry from string to int : %s\n", err.Error())
 	}
 	return i
+}
+
+func EnableVerbose() bool {
+	return GetConfig().GetBool(DOCKER_COMPOSE_VERBOSE)
 }
 
 func GetNetwork() (types.Network, bool) {

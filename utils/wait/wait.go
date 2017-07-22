@@ -162,6 +162,7 @@ func RetryCmd(retry int, cmd *exec.Cmd) ([]byte, error) {
 		out, err = cmd.Output()
 		if err != nil {
 			log.Warnf("Error to exec cmd %v with count %d : %v", cmd.Args, i, err)
+			time.Sleep(10 * time.Second)
 			continue
 		}
 		return out, nil
