@@ -15,28 +15,30 @@
 package general
 
 import (
+	"context"
 	"os"
 	"strconv"
 	"strings"
 
-	"golang.org/x/net/context"
-
 	"github.com/mesos/mesos-go/executor"
 	mesos "github.com/mesos/mesos-go/mesosproto"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v2"
+
 	"github.com/paypal/dce-go/config"
 	"github.com/paypal/dce-go/plugin"
 	"github.com/paypal/dce-go/types"
 	utils "github.com/paypal/dce-go/utils/file"
 	"github.com/paypal/dce-go/utils/pod"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v2"
 )
 
 var logger *log.Entry
 
 type generalExt struct {
 }
+
+var infraYmlPath string
 
 func init() {
 	logger = log.WithFields(log.Fields{
@@ -63,7 +65,7 @@ func (ge *generalExt) PreLaunchTask(ctx *context.Context, composeFiles *[]string
 
 	if (*ctx).Value(types.SERVICE_DETAIL) == nil {
 		var servDetail types.ServiceDetail
-		servDetail, err = utils.ParseYamls(*composeFiles)
+		servDetail, err = utils.ParseYamls(composeFiles)
 		if err != nil {
 			log.Errorf("Error parsing yaml files : %v", err)
 			return err
@@ -74,6 +76,7 @@ func (ge *generalExt) PreLaunchTask(ctx *context.Context, composeFiles *[]string
 
 	currentPort := pod.GetPorts(taskInfo)
 
+	// Create infra container yml file
 	infrayml, err := CreateInfraContainer(ctx, types.INFRA_CONTAINER_YML)
 	if err != nil {
 		logger.Errorln("Error creating infra container : ", err.Error())
@@ -93,6 +96,7 @@ func (ge *generalExt) PreLaunchTask(ctx *context.Context, composeFiles *[]string
 
 		if strings.Contains(editedFile, types.INFRA_CONTAINER_GEN_YML) {
 			indexInfra = i
+			infraYmlPath = editedFile
 		}
 
 		if editedFile != "" {
@@ -100,12 +104,17 @@ func (ge *generalExt) PreLaunchTask(ctx *context.Context, composeFiles *[]string
 		}
 	}
 
+	// Remove infra container yml file if network mode is host
 	if config.GetConfig().GetBool(types.RM_INFRA_CONTAINER) {
-		logger.Println("Reomve infra container")
+		logger.Printf("Remove file: %s\n", types.INFRA_CONTAINER_GEN_YML)
 		filesMap := (*ctx).Value(types.SERVICE_DETAIL).(types.ServiceDetail)
 		delete(filesMap, editedFiles[indexInfra])
 		*ctx = context.WithValue(*ctx, types.SERVICE_DETAIL, filesMap)
 		editedFiles = append(editedFiles[:indexInfra], editedFiles[indexInfra+1:]...)
+		err = utils.DeleteFile(types.INFRA_CONTAINER_YML)
+		if err != nil {
+			log.Errorf("Error deleting infra yml file %v", err)
+		}
 	}
 
 	logger.Println("====================context out====================")
@@ -124,6 +133,13 @@ func (ge *generalExt) PreLaunchTask(ctx *context.Context, composeFiles *[]string
 
 func (gp *generalExt) PostLaunchTask(ctx *context.Context, files []string, taskInfo *mesos.TaskInfo) (string, error) {
 	logger.Println("PostLaunchTask begin")
+	if pod.SinglePort {
+		err := PostEditComposeFile(ctx, infraYmlPath)
+		if err != nil {
+			log.Errorf("PostLaunchTask: Error editing compose file : %v", err)
+			return types.POD_FAILED, err
+		}
+	}
 	return "", nil
 }
 
@@ -134,7 +150,26 @@ func (gp *generalExt) PreKillTask(taskInfo *mesos.TaskInfo) error {
 
 func (gp *generalExt) PostKillTask(taskInfo *mesos.TaskInfo) error {
 	logger.Println("PostKillTask begin")
-	return nil
+	var err error
+
+	// clean pod volume and container if clean_container_volume_on_kill is true
+	cleanVolumeAndContainer := config.GetConfigSection(config.CLEANPOD)[config.CLEAN_CONTAINER_VOLUME_ON_MESOS_KILL]
+	if cleanVolumeAndContainer == "true" {
+		err = pod.RemovePodVolume(pod.ComposeFiles)
+		if err != nil {
+			log.Errorf("Error cleaning volumes: %v", err)
+		}
+	}
+
+	// clean pod images if clean_image_on_kill is true
+	cleanImage := config.GetConfigSection(config.CLEANPOD)[config.CLEAN_IMAGE_ON_MESOS_KILL]
+	if cleanImage == "true" {
+		err = pod.RemovePodImage(pod.ComposeFiles)
+		if err != nil {
+			log.Errorf("Error cleaning images: %v", err)
+		}
+	}
+	return err
 }
 
 func (gp *generalExt) Shutdown(executor.ExecutorDriver) error {
@@ -181,7 +216,7 @@ func CreateInfraContainer(ctx *context.Context, path string) (string, error) {
 		}
 	}
 
-	service[NETWORK_PROXY] = containerDetail
+	service[types.INFRA_CONTAINER] = containerDetail
 	_yaml[types.SERVICES] = service
 	_yaml[types.VERSION] = "2.1"
 	log.Println(_yaml)

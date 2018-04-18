@@ -16,12 +16,14 @@ package wait
 
 import (
 	"errors"
+	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 
-	"os/exec"
-
+	"github.com/paypal/dce-go/config"
 	"github.com/paypal/dce-go/types"
 )
 
@@ -42,29 +44,28 @@ func PollForever(interval time.Duration, done <-chan string, condition Condition
 // The backoff time will be retry * interval
 func PollRetry(retry int, interval time.Duration, condition ConditionFunc) error {
 	log.Println("PullRetry : max pull retry is set as", retry)
-	//log.Println("PullRetry : timeout :", timeout)
 	log.Println("PullRetry : interval:", interval)
+
 	var err error
+	factor := 1
 	for i := 0; i < retry; i++ {
 		if i != 0 {
 			log.Println("Condition Func failed, Start Retrying : ", i)
 		}
-		//timeout, _, err = CountDown(timeout, condition)
 		_, err = condition()
 		if err == nil {
 			return nil
 		}
 
-		time.Sleep(time.Duration(i+1) * interval)
-		//timeout -= time.Duration(i+1) * interval
+		time.Sleep(time.Duration((i+1)*factor) * interval)
 	}
 	return ErrTimeOut
 }
 
 // Keep polling a condition func until timeout or a message/error is returned
 func PollUntil(interval time.Duration, done <-chan string, timeout time.Duration, condition ConditionFunc) (string, error) {
-	tricker := time.NewTicker(interval)
-	defer tricker.Stop()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 
 	var after <-chan time.Time
 	if timeout != 0 {
@@ -75,7 +76,7 @@ func PollUntil(interval time.Duration, done <-chan string, timeout time.Duration
 
 	for {
 		select {
-		case <-tricker.C:
+		case <-ticker.C:
 			res, err := WaitUntil(timeout, ConditionCHFunc(func(reply chan string) {
 				condition_reply, _ := condition()
 				reply <- condition_reply
@@ -116,20 +117,8 @@ func WaitUntil(timeout time.Duration, condition ConditionCHFunc) (string, error)
 	}
 }
 
-// count down the time left after condition func is finished
-func CountDown(timeout time.Duration, condition ConditionFunc) (time.Duration, string, error) {
-	if timeout > 0 {
-		var start time.Time
-		start = time.Now()
-		res, err := condition()
-		return timeout - time.Since(start), res, err
-	}
-	return 0, "", ErrTimeOut
-}
-
 // wait on exec command finished or timeout
 func WaitCmd(timeout time.Duration, cmd_result *types.CmdResult) error {
-	log.Println("test:::::", timeout)
 	if timeout < time.Duration(0) {
 		log.Println("TIMEOUT is less than zero")
 		return ErrTimeOut
@@ -158,14 +147,61 @@ func WaitCmd(timeout time.Duration, cmd_result *types.CmdResult) error {
 func RetryCmd(retry int, cmd *exec.Cmd) ([]byte, error) {
 	var err error
 	var out []byte
+
+	log.Debugf("Run cmd: %s\n", cmd.Args)
+
+	retryInterval := config.GetRetryInterval()
+	factor := 1
 	for i := 0; i < retry; i++ {
-		cmd := exec.Command(cmd.Args[0], cmd.Args[1:]...)
-		out, err = cmd.Output()
+		_cmd := exec.Command(cmd.Args[0], cmd.Args[1:]...)
+
+		if cmd.Stdout == nil {
+			_cmd.Stderr = os.Stderr
+			out, err = _cmd.Output()
+		} else {
+			_cmd.Stdout = cmd.Stdout
+			_cmd.Stderr = cmd.Stderr
+			err = _cmd.Run()
+		}
+
 		if err != nil {
-			log.Warnf("Error to exec cmd %v with count %d : %v", cmd.Args, i, err)
+			log.Warnf("Error to exec cmd %v with count %d : %v, retry after %v Millisecond", _cmd.Args, i, err, retryInterval)
+			if strings.Contains(err.Error(), "already started") {
+				return out, nil
+			}
+			time.Sleep(retryInterval * time.Duration((i+1)*factor) * time.Millisecond)
 			continue
 		}
+
 		return out, nil
 	}
 	return nil, err
+}
+
+// Retry command forever
+func RetryCmdLogs(cmd *exec.Cmd) ([]byte, error) {
+	var err error
+	var out []byte
+
+	retryInterval := config.GetRetryInterval()
+	for {
+		_cmd := exec.Command(cmd.Args[0], cmd.Args[1:]...)
+		log.Printf("Run cmd %s", _cmd.Args)
+
+		if cmd.Stdout == nil {
+			_cmd.Stderr = os.Stderr
+			out, err = _cmd.Output()
+		} else {
+			_cmd.Stdout = cmd.Stdout
+			_cmd.Stderr = cmd.Stderr
+			err = _cmd.Run()
+			if err != nil {
+				log.Printf("Error running cmd: %v", err)
+			}
+		}
+
+		log.Printf("cmd %s exits, retry...", _cmd.Args)
+		time.Sleep(retryInterval * time.Millisecond)
+	}
+	return out, err
 }
