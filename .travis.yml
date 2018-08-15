@@ -5,5 +5,5 @@ go:
   - "1.10.x"
   
 script:
-  - go test -v ./...
+  - go test -v github.com/paypal/dce-go
   - go build -o executor dce/main.go
