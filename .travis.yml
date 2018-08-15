@@ -1,0 +1,25 @@
+language: go
+
+sudo: required
+
+go:
+  - "1.9.x"
+  - "1.10.x"
+
+services:
+  - docker
+
+notifications:
+  email: false
+
+script:
+  - glide install --strip-vendor
+  - go test -v github.com/paypal/dce-go
+  - go build -o executor dce/main.go
+
+before_install:
+  # Install Glide
+  - wget "https://github.com/Masterminds/glide/releases/download/v0.12.1/glide-v0.12.1-linux-amd64.tar.gz"
+  - mkdir -p $HOME/bin
+  - tar -vxz -C $HOME/bin --strip=1 -f glide-v0.12.1-linux-amd64.tar.gz
+  - export PATH="$HOME/bin:$PATH"
