@@ -831,7 +831,11 @@ func SendMesosStatus(driver executor.ExecutorDriver, taskId *mesos.TaskID, state
 	if state.Enum().String() == mesos.TaskState_TASK_FAILED.Enum().String() ||
 		state.Enum().String() == mesos.TaskState_TASK_FINISHED.Enum().String() {
 		log.Println("====================Stop ExecutorDriver====================")
-		driver.Stop()
+		status, err := driver.Stop()
+		if err != nil {
+			logger.Errorf("error from driver.Stop(): %v",err)
+		}
+		logger.Printf("driver.Stop() completed with status %s", status.String())
 	}
 
 	logger.Printf(" SendMesosStatus complete.")
