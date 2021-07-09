@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 
-//go:generate go-extpoints . ComposePlugin PodStatusHook
+//go:generate go-extpoints . ComposePlugin PodStatusHook Monitor
 package plugin
 
 import (
@@ -20,28 +20,29 @@ import (
 
 	"github.com/mesos/mesos-go/executor"
 	mesos "github.com/mesos/mesos-go/mesosproto"
+	"github.com/paypal/dce-go/types"
 )
 
 type ComposePlugin interface {
-	// Get the name of the plugin
+	// Name gets the name of the plugin
 	Name() string
 
-	// execute some tasks before the Image is pulled
+	// LaunchTaskPreImagePull executes some tasks before the Image is pulled
 	LaunchTaskPreImagePull(ctx *context.Context, composeFiles *[]string, executorId string, taskInfo *mesos.TaskInfo) error
 
-	// execute some tasks after the Image is pulled
+	// LaunchTaskPostImagePull executes some tasks after the Image is pulled
 	LaunchTaskPostImagePull(ctx *context.Context, composeFiles *[]string, executorId string, taskInfo *mesos.TaskInfo) error
 
-	// execute the tasks after the pod is launched
+	// PostLaunchTask executes the tasks after the pod is launched
 	PostLaunchTask(ctx *context.Context, composeFiles []string, taskInfo *mesos.TaskInfo) (string, error)
 
-	// execute the task before we send a Kill to Mesos
+	// PreKillTask executes the task before we send a Kill to Mesos
 	PreKillTask(taskInfo *mesos.TaskInfo) error
 
-	// execute the task after we send a Kill to Mesos
+	// PostKillTask executes the task after we send a Kill to Mesos
 	PostKillTask(taskInfo *mesos.TaskInfo) error
 
-	// execute the task to shutdown the pod
+	// Shutdown executes the task to shutdown the pod
 	Shutdown(executor.ExecutorDriver) error
 }
 
@@ -52,4 +53,11 @@ type PodStatusHook interface {
 	// and also a flag "failExec" indicating if the error needs to fail the execution when a series of hooks are executed
 	// This is to support cases where a few hooks can be executed in a best effort manner and need not fail the executor
 	Execute(podStatus string, data interface{}) (failExec bool, err error)
+}
+
+// Monitor inspects pods periodically until pod failed or terminated It also defines when to consider a pod as failed.
+// Move monitor as a plugin provides flexibility to replace default monitor logic.
+// Monitor name presents in config `monitorName` will be used, otherwise, default monitor will be used.
+type Monitor interface {
+	Start(ctx context.Context) (types.PodStatus, error)
 }
